@@ -50,19 +50,22 @@ if __name__ == "__main__":
     labels = []
     for i in range(meta_patch.shape[0]):
         print('doing file %d of %d' % (i, meta_patch.shape[0]))
-        img = np.load(os.path.join(rootdir, 'DATA_S2/S2_%d.npy' % meta_patch['ID_PATCH'].iloc[i]))
-        lab = np.load(os.path.join(rootdir, 'ANNOTATIONS/TARGET_%d.npy' % meta_patch['ID_PATCH'].iloc[i]))
-        ids = np.load(os.path.join(rootdir, 'ANNOTATIONS/ParcelIDs_%d.npy' % meta_patch['ID_PATCH'].iloc[i]))
+        img = np.load(os.path.join(rootdir, 'DATA_S2/S2_%d.npy' % meta_patch['ID_PATCH'].iloc[i])).astype(np.int16)
+        lab = np.load(os.path.join(rootdir, 'ANNOTATIONS/TARGET_%d.npy' % meta_patch['ID_PATCH'].iloc[i])).astype(np.int16)
+        ids = np.load(os.path.join(rootdir, 'ANNOTATIONS/ParcelIDs_%d.npy' % meta_patch['ID_PATCH'].iloc[i])).astype(np.int16)
         dates = meta_patch['dates-S2'].iloc[i]
-        doy = np.array([get_doy(d) for d in dates.values()])
+        doy = np.array([get_doy(d) for d in dates.values()]).astype(np.int16)
         idx = np.argsort(doy)
         img = img[idx]
         doy = doy[idx]
         unfolded_images = unfold_reshape(torch.tensor(img), HWout).numpy()
         unfolded_labels = unfold_reshape(torch.tensor(lab), HWout).numpy()
+        # print(f'shape of images and labels:\n{unfolded_images.shape}\n{unfolded_labels.shape}')
 
-        for j in unfolded_images.shape[0]:
+        for j in range(unfolded_images.shape[0]):
+        # for j in unfolded_images.shape[0]:
             sample = {'img': unfolded_images[j], 'labels': unfolded_labels[j], 'doy': doy}
 
-            with open(os.path.join(savedir, "%d_%d.pickle" % (meta_patch['ID_PATCH'].iloc[i], j)), "wb") as output_file:
+            # with open(os.path.join(savedir, "%d_%d.pickle" % (meta_patch['ID_PATCH'].iloc[i], j)), "wb") as output_file:
+            with open(f"{savedir}/{meta_patch['ID_PATCH'].iloc[i]}_{j}.packle", "wb") as output_file:
                 pickle.dump(sample, output_file)

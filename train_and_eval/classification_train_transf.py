@@ -208,6 +208,7 @@ if __name__ == "__main__":
 
     config = read_yaml(config_file)
     config['local_device_ids'] = device_ids
+    # config['CHECKPOINT']['machine'] = machine
 
     center = config['MODEL']['img_res'] // 2
     dataloaders = get_dataloaders(config)

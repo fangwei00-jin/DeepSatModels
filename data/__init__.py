@@ -20,7 +20,7 @@ def get_dataloaders(config):
     eval_config  = config['DATASETS']['eval']
     eval_config['bidir_input'] = model_config['architecture'] == "ConvBiRNN"
     dataloaders = {}
-    
+
     # TRAIN data -------------------------------------------------------------------------------------------------------
     train_config['base_dir'] = DATASET_INFO[train_config['dataset']]['basedir']
     train_config['paths'] = DATASET_INFO[train_config['dataset']]['paths_train']
@@ -63,22 +63,22 @@ def get_dataloaders(config):
 
 
 def get_model_data_input(config):
-    
+
     def unidir_segmentation_inputs(sample, device):
         inputs = sample['inputs'].to(device)
         return inputs
-    
+
     def bidir_segmentation_inputs(sample, device):
         inputs = sample['inputs'].to(device)
         inputs_backward = sample['inputs_backward'].to(device)
         seq_lengths = sample['seq_lengths'].to(device)
         return inputs, inputs_backward, seq_lengths
-    
+
     model = config['MODEL']['architecture']
 
     if model in ['ConvBiRNN']:
         return bidir_segmentation_inputs
-    
+
     if model in ['UNET3D', 'UNET3Df', 'UNET2D-CLSTM']:
         return unidir_segmentation_inputs
 
