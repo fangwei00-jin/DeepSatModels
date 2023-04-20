@@ -10,10 +10,10 @@ T31TFM_1618:
 
 # PASTIS24 benchmark -------------------------------------------------------------------------------------------------
 PASTIS24_fold1:
-    basedir: "/media/michaeltrs/0a8a5a48-ede5-47d0-8eff-10d11350bf98/Satellite_Data/PASTIS24"
-    paths_train: "/media/michaeltrs/0a8a5a48-ede5-47d0-8eff-10d11350bf98/Satellite_Data/PASTIS24/fold-paths/folds_1_123_paths.csv"
-    paths_eval: "/media/michaeltrs/0a8a5a48-ede5-47d0-8eff-10d11350bf98/Satellite_Data/PASTIS24/fold-paths/fold_4_paths.csv"
-    paths_test: "/media/michaeltrs/0a8a5a48-ede5-47d0-8eff-10d11350bf98/Satellite_Data/PASTIS24/fold-paths/fold_5_paths.csv"
+    basedir: "/media/home/zhangbo/datasets/PASTIS24"
+    paths_train: "/media/home/zhangbo/datasets/PASTIS24/fold-paths/folds_1_123_paths.csv"
+    paths_eval: "/media/home/zhangbo/datasets/PASTIS24/fold-paths/fold_4_paths.csv"
+    paths_test: "/media/home/zhangbo/datasets/PASTIS24/fold-paths/fold_5_paths.csv"
 #    PASTIS24_fold1:
 #        basedir: ".../PASTIS24"
 #        paths_train: ".../fold-paths/folds_1_123_paths.csv"

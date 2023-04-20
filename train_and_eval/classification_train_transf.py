@@ -5,7 +5,7 @@ import argparse
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from train_and_eval.utils.lr_scheduler import build_scheduler
+# from train_and_eval.utils.lr_scheduler import build_scheduler
 from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 import os
@@ -209,7 +209,7 @@ if __name__ == "__main__":
 
     config = read_yaml(config_file)
     config['local_device_ids'] = device_ids
-    config['CHECKPOINT']['machine'] = machine
+    # config['CHECKPOINT']['machine'] = machine
 
     center = config['MODEL']['img_res'] // 2
     dataloaders = get_dataloaders(config)
