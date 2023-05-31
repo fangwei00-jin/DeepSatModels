@@ -7,9 +7,9 @@ class RecurrentNorm2d(nn.Module):
     """
     Normalization Module which keeps track of separate statistics for each timestep as described in
     https://arxiv.org/pdf/1603.09025.pdf
-    
+
     Currently only configured to use BN
-    
+
     TODO:
     - Add support for Layer Norm
     - Add support for Group Norm
@@ -44,7 +44,7 @@ class RecurrentNorm2d(nn.Module):
                 'running_mean_{}'.format(i), torch.zeros(num_features))
             self.register_buffer(
                 'running_var_{}'.format(i), torch.ones(num_features))
-        
+
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -56,7 +56,7 @@ class RecurrentNorm2d(nn.Module):
         if self.affine:
             # initialize to .1 as advocated in the paper
             self.weight.data = torch.ones(self.num_features) * .1
-            
+
     def _check_input_dim(self, input_):
         if input_.size(1) != self.running_mean_0.nelement():
             raise ValueError('got {}-feature tensor, expected {}'
@@ -84,17 +84,17 @@ class RecurrentNorm2d(nn.Module):
 #     """
 #     Normalization Module which keeps track of separate statistics for each timestep as described in
 #     https://arxiv.org/pdf/1603.09025.pdf
-    
+
 #     Currently only configured to use BN
-    
+
 #     TODO:
 #     - Add support for Layer Norm
 #     - Add support for Group Norm
-    
+
 #     """
 
 #     def __init__(self, num_features, max_timesteps, eps=1e-5, momentum=0.1,
-#                  affine=True): 
+#                  affine=True):
 #         super(RecurrentNorm2d, self).__init__()
 #         self.num_features = num_features
 #         self.max_timesteps = max_timesteps
@@ -102,14 +102,14 @@ class RecurrentNorm2d(nn.Module):
 #         self.eps = eps
 #         self.momentum = momentum
 #         self.norms = []
-        
+
 #         for i in range(self.max_timesteps):
 #             # TODO: condition on the type of normalization
 #             self.norms.append(nn.BatchNorm2d(self.num_features, self.eps, self.momentum, self.affine))
 #             self.norms[i].reset_parameters()
-            
+
 #         self.norms = nn.ModuleList(self.norms)
-    
+
 #     def _check_input_dim(self, input_):
 #         if input_.size(1) != self.num_features:
 #             raise ValueError('got {}-feature tensor, expected {}'
@@ -120,4 +120,3 @@ class RecurrentNorm2d(nn.Module):
 #         if timestep >= self.max_timesteps:
 #             timestep = self.max_timesteps - 1
 #         return self.norms[timestep](input_)
-    

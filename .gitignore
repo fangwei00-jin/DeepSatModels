@@ -1,2 +1,7 @@
 *.pyc
 .*/
+PASTIS24/*
+**/saved_models/*
+runlog/*
+nohup.log
+*.log

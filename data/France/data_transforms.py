@@ -50,7 +50,7 @@ def get_label_names(label_dict):
         names[remap_label_dict[label]] = label_dict[label]
     return names
 
-    
+
 def France_segmentation_transform(model_config, data_config, is_training):
     """
     """
@@ -206,12 +206,12 @@ class RemapLabel(object):
     items in  : x10, x20, x60, day, year, labels
     items out : x10, x20, x60, day, year, labels
     """
-    
+
     def __init__(self, labels_dict, ground_truth2remap='labels'):
         assert isinstance(labels_dict, (dict,))
         self.labels_dict = labels_dict
         self.ground_truth2remap = ground_truth2remap
-    
+
     def __call__(self, sample):
         labels = sample[self.ground_truth2remap]
         not_remapped = torch.ones(labels.shape, dtype=torch.bool)
@@ -232,9 +232,9 @@ class Normalize(object):
     items out : x10, x20, x60, day, year, labels
     """
     def __call__(self, sample):
-        sample['x10'] = sample['x10'] * 1e-4
-        sample['x20'] = sample['x20'] * 1e-4
-        sample['x60'] = sample['x60'] * 1e-4
+        sample['x10'] = sample['x10'] * 1.0e-4
+        sample['x20'] = sample['x20'] * 1.0e-4
+        sample['x60'] = sample['x60'] * 1.0e-4
         sample['doy'] = sample['doy'] / 365.0001  # 365 + h, h = 0.0001 to avoid placing day 365 in out of bounds bin
         # sample['year'] = sample['year'] - 2016
         return sample
@@ -307,7 +307,7 @@ class Rescale(object):
         img = F.upsample(img, size=(self.new_h, self.new_w), mode=mode)
         img = img.permute(0, 2, 3, 1)  # move back
         return img
-    
+
     def rescale_2d_map(self, image, mode):
         # t, h, w, c = image.shape
         img = image.permute(2, 0, 1).unsqueeze(0)
@@ -337,15 +337,15 @@ class TileDates(object):
     def __call__(self, sample):
         sample['doy'] = self.repeat(sample['doy'], binned=self.doy_bins is not None)
         return sample
-    
+
     def repeat(self, tensor, binned=False):
         if binned:
             out = tensor.unsqueeze(1).unsqueeze(1).repeat(1, self.H, self.W, 1)#.permute(0, 2, 3, 1)
         else:
             out = tensor.repeat(1, self.H, self.W, 1).permute(3, 1, 2, 0)
         return out
-    
-    
+
+
 # 7
 class Concat(object):
     """
@@ -355,7 +355,7 @@ class Concat(object):
     """
     def __init__(self, concat_keys):
         self.concat_keys = concat_keys
-        
+
     def __call__(self, sample):
         try:
             inputs = torch.cat([sample[key] for key in self.concat_keys], dim=-1)
@@ -376,8 +376,8 @@ class AddBackwardInputs(object):
     def __call__(self, sample):
         sample['inputs_backward'] = torch.flip(sample['inputs'], (0,))
         return sample
-    
-    
+
+
 # 9
 class CutOrPad(object):
     """
@@ -425,7 +425,7 @@ class CutOrPad(object):
                 start_idx = torch.randint(seq_len - self.max_seq_len, (1,))[0]
             tensor = tensor[start_idx:start_idx+self.max_seq_len]
         return tensor
-    
+
     def random_subseq(self, seq_len):
         return torch.randperm(seq_len)[:self.max_seq_len].sort()[0]
 
@@ -437,14 +437,14 @@ class HVFlip(object):
     items in  : inputs, *inputs_backward, labels
     items out : inputs, *inputs_backward, labels
     """
-    
+
     def __init__(self, hflip_prob, vflip_prob, ground_truths=[]):
         assert isinstance(hflip_prob, (float,))
         assert isinstance(vflip_prob, (float,))
         self.hflip_prob = hflip_prob
         self.vflip_prob = vflip_prob
         self.ground_truths = ground_truths
-    
+
     def __call__(self, sample):
         if random.random() < self.hflip_prob:
             sample['inputs'] = torch.flip(sample['inputs'], (2,))
@@ -452,7 +452,7 @@ class HVFlip(object):
                 sample['inputs_backward'] = torch.flip(sample['inputs_backward'], (2,))
             for gt in self.ground_truths:
                 sample[gt] = torch.flip(sample[gt], (1,))
-        
+
         if random.random() < self.vflip_prob:
             sample['inputs'] = torch.flip(sample['inputs'], (1,))
             if "inputs_backward" in sample:
@@ -528,10 +528,10 @@ class AddBagOfLabels(object):
     items in  : inputs, labels
     items out : inputs, inputs_backward, labels
     """
-    
+
     def __init__(self, n_class):
         self.n_class = n_class
-    
+
     def __call__(self, sample):
         labels = sample['labels']
         bol = torch.zeros(self.n_class)
@@ -547,20 +547,20 @@ class AddEdgeLabel(object):
     items in  : x10, x20, x60, day, year, labels
     items out : x10, x20, x60, day, year, labels
     """
-    
+
     def __init__(self, nb_size=3, stride=1, pad_size=1, axes=[0, 1]):
         self.nb_size = nb_size
         self.stride = stride
         self.pad_size = pad_size
         self.axes = axes
-    
+
     def __call__(self, sample):
         labels = sample['labels'].permute(2, 0, 1)[0]
         # print(labels.shape)
         edge_labels = self.get_edge_labels(labels)
         sample['edge_labels'] = edge_labels
         return sample
-    
+
     def get_edge_labels(self, labels):
         lto = labels.to(torch.float32)
         H = lto.shape[self.axes[0]]
@@ -648,7 +648,7 @@ class AddCSCLLabels(object):
         self.dilated_kernel_size = (kernel_size - 1) * kernel_dilation + 1
         print("dilated win size: ", self.dilated_kernel_size)
         self.pad_size = self.dilated_kernel_size // 2
-    
+
     def __call__(self, sample):
         ### ALSO unfold unk masks to mask SAL
         # https://en.wikipedia.org/wiki/Logical_matrix

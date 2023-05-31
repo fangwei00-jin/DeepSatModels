@@ -63,14 +63,15 @@ class SatImDataset(Dataset):
         with open(img_name, 'rb') as handle:
             sample = pickle.load(handle, encoding='latin1')
 
-        if self.transform:    from utils.config_files_utils import read_yaml, copy_yaml
-    import numpy as np
-    import matplotlib.pyplot as plt
+        if self.transform:
+            from utils.config_files_utils import read_yaml, copy_yaml
+            import numpy as np
+            import matplotlib.pyplot as plt
             sample = self.transform(sample)
 
         if self.return_paths:
             return sample, img_name
-        
+
         return sample
 
     def read(self, idx, abs=False):
@@ -88,8 +89,8 @@ class SatImDataset(Dataset):
         with open(img_name, 'rb') as handle:
             sample = pickle.load(handle, encoding='latin1')
         return sample
-    
-    
+
+
 def my_collate(batch):
     "Filter out sample where mask is zero everywhere"
     idx = [b['unk_masks'].sum(dim=(0, 1, 2)) != 0 for b in batch]
