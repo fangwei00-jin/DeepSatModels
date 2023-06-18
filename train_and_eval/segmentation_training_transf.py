@@ -1,3 +1,4 @@
+from doctest import debug
 import sys
 import os
 sys.path.insert(0, os.getcwd())
@@ -19,12 +20,20 @@ from metrics.loss_functions import get_loss
 from utils.summaries import write_mean_summaries, write_class_summaries
 from data import get_loss_data_input
 
+from loguru import logger, _defaults
+import time
+
+def save_netparam(net, path, devices=[0]):
+    if len(devices) > 1:
+        torch.save(net.module.state_dict(), path)
+    else:
+        torch.save(net.state_dict(), path)
 
 def train_and_evaluate(net, dataloaders, config, device, lin_cls=False):
 
     def train_step(net, sample, loss_fn, optimizer, device, loss_input_fn):
         optimizer.zero_grad()
-        # print(sample['inputs'].shape)
+        # logger.info(sample['inputs'].shape)
         outputs = net(sample['inputs'].to(device))
         outputs = outputs.permute(0, 2, 3, 1)
         ground_truth = loss_input_fn(sample, device)
@@ -32,7 +41,7 @@ def train_and_evaluate(net, dataloaders, config, device, lin_cls=False):
         loss.backward()
         optimizer.step()
         return outputs, ground_truth, loss
-  
+
     def evaluate(net, evalloader, loss_fn, config):
         num_classes = config['MODEL']['num_classes']
         predicted_all = []
@@ -54,12 +63,12 @@ def train_and_evaluate(net, dataloaders, config, device, lin_cls=False):
                     predicted_all.append(predicted.view(-1).cpu().numpy())
                     labels_all.append(target.view(-1).cpu().numpy())
                 losses_all.append(loss.view(-1).cpu().detach().numpy())
-                
+
                 # if step > 5:
                 #    break
 
-        print("finished iterating over dataset after step %d" % step)
-        print("calculating metrics...")
+        logger.info("finished iterating over dataset after step %d" % step)
+        logger.info("calculating metrics...")
         predicted_classes = np.concatenate(predicted_all)
         target_classes = np.concatenate(labels_all)
         losses = np.concatenate(losses_all)
@@ -72,16 +81,10 @@ def train_and_evaluate(net, dataloaders, config, device, lin_cls=False):
         class_acc, class_precision, class_recall, class_F1, class_IOU = eval_metrics['class']
 
         un_labels, class_loss = get_per_class_loss(losses, target_classes, unk_masks=None)
-
-        print(
-            "-----------------------------------------------------------------------------------------------------------------------------------------------------------------")
-        print("Mean (micro) Evaluation metrics (micro/macro), loss: %.7f, iou: %.4f/%.4f, accuracy: %.4f/%.4f, "
+        logger.info("Mean (micro) Evaluation metrics (micro/macro), loss: %.7f, iou: %.4f/%.4f, accuracy: %.4f/%.4f, "
               "precision: %.4f/%.4f, recall: %.4f/%.4f, F1: %.4f/%.4f, unique pred labels: %s" %
               (losses.mean(), micro_IOU, macro_IOU, micro_acc, macro_acc, micro_precision, macro_precision,
                micro_recall, macro_recall, micro_F1, macro_F1, np.unique(predicted_classes)))
-        print(
-            "-----------------------------------------------------------------------------------------------------------------------------------------------------------------")
-
         return (un_labels,
                 {"macro": {"Loss": losses.mean(), "Accuracy": macro_acc, "Precision": macro_precision,
                            "Recall": macro_recall, "F1": macro_F1, "IOU": macro_IOU},
@@ -110,7 +113,7 @@ def train_and_evaluate(net, dataloaders, config, device, lin_cls=False):
     if checkpoint:
         load_from_checkpoint(net, checkpoint, partial_restore=False)
 
-    print("current learn rate: ", lr)
+    logger.info("current learn rate: ", lr)
 
     if len(local_device_ids) > 1:
         net = nn.DataParallel(net, device_ids=local_device_ids)
@@ -119,10 +122,11 @@ def train_and_evaluate(net, dataloaders, config, device, lin_cls=False):
     if save_path and (not os.path.exists(save_path)):
         os.makedirs(save_path)
 
-    copy_yaml(config)
+    if not config['debug']:
+        copy_yaml(config)
 
     loss_input_fn = get_loss_data_input(config)
-    
+
     loss_fn = {'all': get_loss(config, device, reduction=None),
                'mean': get_loss(config, device, reduction="mean")}
 
@@ -132,81 +136,91 @@ def train_and_evaluate(net, dataloaders, config, device, lin_cls=False):
     optimizer.zero_grad()
 
     scheduler = build_scheduler(config, optimizer, num_steps_train)
-
-    writer = SummaryWriter(save_path)
+    dt_info = time.strftime('%y%m%d_%H%M', time.localtime())
+    save_path += f'/{dt_info}'
+    logger.info(f'savepath: {save_path}')
+    if not config['debug']:
+        writer = SummaryWriter(f'{save_path}')
 
     BEST_IOU = 0
     net.train()
     for epoch in range(start_epoch, start_epoch + num_epochs):  # loop over the dataset multiple times
         for step, sample in enumerate(dataloaders['train']):
             abs_step = start_global + (epoch - start_epoch) * num_steps_train + step
+            train_start = time.time()
             logits, ground_truth, loss = train_step(net, sample, loss_fn, optimizer, device, loss_input_fn=loss_input_fn)
             if len(ground_truth) == 2:
                 labels, unk_masks = ground_truth
             else:
                 labels = ground_truth
                 unk_masks = None
-            # print batch statistics ----------------------------------------------------------------------------------#
+            # logger.info batch statistics ----------------------------------------------------------------------------------#
             if abs_step % train_metrics_steps == 0:
                 logits = logits.permute(0, 3, 1, 2)
                 batch_metrics = get_mean_metrics(
                     logits=logits, labels=labels, unk_masks=unk_masks, n_classes=num_classes, loss=loss, epoch=epoch,
                     step=step)
-                write_mean_summaries(writer, batch_metrics, abs_step, mode="train", optimizer=optimizer)
-                print("abs_step: %d, epoch: %d, step: %5d, loss: %.7f, batch_iou: %.4f, batch accuracy: %.4f, batch precision: %.4f, "
-                      "batch recall: %.4f, batch F1: %.4f" %
-                      (abs_step, epoch, step + 1, loss, batch_metrics['IOU'], batch_metrics['Accuracy'], batch_metrics['Precision'],
-                       batch_metrics['Recall'], batch_metrics['F1']))
+                if not config['debug']:
+                    write_mean_summaries(writer, batch_metrics, abs_step, mode="train", optimizer=optimizer)
+                logger.info(f"epoch: {epoch}, abs_step: {abs_step:>5}, step:{step + 1:>4}, step time:{time.time()-train_start:.2f} | "
+                    f"loss:{loss:.2}, iou:{batch_metrics['IOU']:.4f}, accuracy: {batch_metrics['Accuracy']:.4f}, "
+                    f"precision:{batch_metrics['Precision']:.4f}, recall: {batch_metrics['Recall']:.4f}, F1:{batch_metrics['F1']:.4f}")
 
-            if abs_step % save_steps == 0:
-                if len(local_device_ids) > 1:
-                    torch.save(net.module.state_dict(), "%s/%depoch_%dstep.pth" % (save_path, epoch, abs_step))
-                else:
-                    torch.save(net.state_dict(), "%s/%depoch_%dstep.pth" % (save_path, epoch, abs_step))
+            if abs_step % save_steps == 0 and not config['debug']:
+                save_netparam(net, f'{save_path}/{epoch}epoch_{abs_step}step.pth', local_device_ids)
 
             # evaluate model ------------------------------------------------------------------------------------------#
             if abs_step % eval_steps == 0:
                 eval_metrics = evaluate(net, dataloaders['eval'], loss_fn, config)
                 if eval_metrics[1]['macro']['IOU'] > BEST_IOU:
-                    if len(local_device_ids) > 1:
-                        torch.save(net.module.state_dict(), "%s/best.pth" % (save_path))
-                    else:
-                        torch.save(net.state_dict(), "%s/best.pth" % (save_path))
+                    if not config['debug']:
+                        save_netparam(net, f'{save_path}/best.pth', local_device_ids)
                     BEST_IOU = eval_metrics[1]['macro']['IOU']
+                logger.info(f'evaluation BEST_IOU: {BEST_IOU:.5f} \n{" "*20}current all_metrics {eval_metrics[1]["macro"]}')
 
-
-                write_mean_summaries(writer, eval_metrics[1]['micro'], abs_step, mode="eval_micro", optimizer=None)
-                write_mean_summaries(writer, eval_metrics[1]['macro'], abs_step, mode="eval_macro", optimizer=None)
-                write_class_summaries(writer, [eval_metrics[0], eval_metrics[1]['class']], abs_step, mode="eval",
-                                      optimizer=None)
+                if not config['debug']:
+                    write_mean_summaries(writer, eval_metrics[1]['micro'], abs_step, mode="eval_micro", optimizer=None)
+                    write_mean_summaries(writer, eval_metrics[1]['macro'], abs_step, mode="eval_macro", optimizer=None)
+                    write_class_summaries(writer, [eval_metrics[0], eval_metrics[1]['class']], abs_step, mode="eval",
+                                        optimizer=None)
                 net.train()
 
         scheduler.step_update(abs_step)
 
-
-
 if __name__ == "__main__":
-
     parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
-    parser.add_argument('--config', help='configuration (.yaml) file to use')
-    parser.add_argument('--device', default='0,1', type=str,
+    parser.add_argument('--config_file', help='configuration (.yaml) file to use')
+    parser.add_argument('--gpu_ids', default='0,1', type=str,
                          help='gpu ids to use')
     parser.add_argument('--lin', action='store_true',
                          help='train linear classifier only')
-
+    parser.add_argument('--debug', action='store_true', help='while debuggind, do not save logs and params.')
     args = parser.parse_args()
-    config_file = args.config
-    print(args.device)
-    device_ids = [int(d) for d in args.device.split(',')]
-    lin_cls = args.lin
 
+    print(args)
+
+    logger.remove() # remove the default log format
+    if args.debug:
+        fmt = "<green>{time:MM-DD HH:mm:ss}</green> | <cyan><b>{level: <5}</b></cyan>|<b>{line: >3}</b> {file} {function} | {message}"
+    else:
+        fmt = "<green>{time:MM-DD HH:mm:ss}</green> | <cyan><b>{level: <5}</b></cyan>| {message}"
+    logfilter = lambda r : r['level'].no >= _defaults.LOGURU_DEBUG_NO if args.debug else _defaults.LOGURU_INFO_NO
+    stdlogger = logger.add(sys.stdout, format=fmt)
+    # logsink = logger.add('./runlog/{time}.log', format=fmt)
+
+    config_file = args.config_file
+    logger.debug(args.gpu_ids)
+    device_ids = [int(d) for d in args.gpu_ids.split(',')]
     device = get_device(device_ids, allow_cpu=False)
+    lin_cls = args.lin
 
     config = read_yaml(config_file)
     config['local_device_ids'] = device_ids
+    config['debug'] = args.debug
 
     dataloaders = get_dataloaders(config)
 
     net = get_model(config, device)
+    logger.info(f'net: {net}')
 
     train_and_evaluate(net, dataloaders, config, device)

@@ -78,8 +78,8 @@ def get_model_data_input(config):
 
     if model in ['ConvBiRNN']:
         return bidir_segmentation_inputs
-
-    if model in ['UNET3D', 'UNET3Df', 'UNET2D-CLSTM']:
+    else:
+    # if model in ['UNET3D', 'UNET3Df', 'UNET2D-CLSTM', 'TSViTcls', 'TSViT']:
         return unidir_segmentation_inputs
 
 

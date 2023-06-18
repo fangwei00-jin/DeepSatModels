@@ -2,7 +2,8 @@ from models.UNet3D.unet3d import UNet3D
 from models.UNet3D.unet3df import UNet3D_CSCL
 # from models.CropTypeMapping.models import FCN_CRNN
 from models.BiConvRNN.biconv_rnn import BiRNNSequentialEncoder
-from models.TSViT.TSViTdense import TSViT
+# from models.TSViT.TSViTseg import TSViT, STViT
+from models.TSViT.TSViTdense import TSViT, STViT, SITS_MViT
 from models.TSViT.TSViTcls import TSViTcls
 
 def get_model(config, device):
@@ -26,6 +27,15 @@ def get_model(config, device):
 
     if model_config['architecture'] == "TSViT":
         return TSViT(model_config).to(device)
+
+    if model_config['architecture'] == "MM_TSViT":
+        return TSViT(model_config).to(device)
+
+    if model_config['architecture'] == "STViT":
+        return STViT(model_config).to(device)
+
+    if model_config['architecture'] == "SITS_MViT":
+        return SITS_MViT(model_config).to(device)
 
     else:
         raise NameError("Model architecture %s not found, choose from: 'UNET3D', 'UNET3Df', 'UNET2D-CLSTM', 'TSViT', 'TSViTcls'")

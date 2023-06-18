@@ -1,5 +1,6 @@
 MODEL:
-  architecture:  "TSViT"
+  # architecture:  "TSViT"
+  architecture:  "SITS_MViT"
   img_res: 24
   max_seq_len: 60
   num_channels: 11

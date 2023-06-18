@@ -1,6 +1,7 @@
 import sys
 import os
 sys.path.insert(0, os.getcwd())
+# os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 import argparse
 import torch
 import torch.nn as nn
@@ -194,14 +195,14 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
     parser.add_argument('--config', help='configuration (.yaml) file to use')
-    parser.add_argument('--device', nargs='+', default=[0, 1], type=int,
+    parser.add_argument('--gpu_ids', nargs='+', default=[0, 1], type=int,
                         help='gpu ids to use')
     parser.add_argument('--lin', action='store_true',
-                         help='train linear classifier only')
+                        help='train linear classifier only')
 
     args = parser.parse_args()
     config_file = args.config
-    device_ids = args.device
+    device_ids = args.gpu_ids
     lin_cls = args.lin
 
     device = get_device(device_ids, allow_cpu=False)

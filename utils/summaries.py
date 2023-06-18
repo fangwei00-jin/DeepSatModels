@@ -1,3 +1,5 @@
+from torch.utils.tensorboard import SummaryWriter
+
 def write_mean_summaries(writer, metrics, abs_step, mode="train", optimizer=None):
     for key in metrics:
         writer.add_scalars(main_tag=key, tag_scalar_dict={'%s_Average' % mode: metrics[key]},

@@ -102,9 +102,7 @@ class Attention(nn.Module):
         return out
 
 
-class MultiScaleAttention(nn.Module):
-    # def __init__(self, patchsize=[(4, 4), (8, 8), (2, 2)], d_input=79, d_model=79):
-    # def __init__(self, patchsize=[(8, 8), (2, 2)], d_input=79, d_model=79):
+class MultiScaleAttention4D(nn.Module):
     def __init__(self, patchsize=[(4, 4), (2, 2)], d_input=79, d_model=79):
         logger.info(f'patchsize: {patchsize}, d_input:{d_input}, d_model:{d_model}')
         super().__init__()
@@ -131,17 +129,14 @@ class MultiScaleAttention(nn.Module):
                 ):
             d_k = query.shape[-3]
             out_w, out_h = w // width, h // height
-            # logger.info('shape of q k v', query.shape, key.shape, value.shape,
-            #       'ow', out_w, 'w', width, 'oh', out_h, 'h', height)
-            # 1) embedding and reshape
+
             query = query.view(b, d_k, out_h, height, out_w, width).permute(0, 2, 4, 1, 3, 5)
             query = query.contiguous().view(b, out_h * out_w, d_k * height * width)
             key = key.view(b, d_k, out_h, height, out_w, width).permute(0, 2, 4, 1, 3, 5)
             key = key.contiguous().view(b, out_h * out_w, d_k * height * width)
             value = value.view(b, d_k, out_h, height, out_w, width).permute(0, 2, 4, 1, 3, 5)
             value = value.contiguous().view(b, out_h * out_w, d_k * height * width)
-            # 2) Apply attention on all the projected vectors in batch.
-            # y, _ = self.attention(query, key, value, torch.empty(1))
+
             scores = torch.matmul(query, key.transpose(-2, -1)) / (query.size(-1) ** -0.5)
             p_attn = scores.softmax(dim=-1)
             y = torch.matmul(p_attn, value)
@@ -154,6 +149,68 @@ class MultiScaleAttention(nn.Module):
         x = rearrange(x, 'b t h w -> b t (h w)')
         return x
 
+class MultiScaleAttention5D(nn.Module):
+    def __init__(self, patchsize=[(4, 4), (2, 2)], d_input=79, d_model=79):
+        logger.info(f'patchsize: {patchsize}, d_input:{d_input}, d_model:{d_model}')
+        super().__init__()
+        self.patchsize = patchsize
+        self.query_embedding = nn.Conv2d(d_input, d_model, kernel_size=1, padding=0)
+        self.value_embedding = nn.Conv2d(d_input, d_model, kernel_size=1, padding=0)
+        self.key_embedding = nn.Conv2d(d_input, d_model, kernel_size=1, padding=0)
+        self.output_linear = nn.Sequential(nn.Conv2d(d_model, d_model, kernel_size=3, padding=1),
+                                           nn.LeakyReLU(0.2, inplace=True))
+
+    def forward(self, x):
+        b, t, c, h, w = x.size()
+        x = rearrange(x, 'b t c h w -> b (t c) h w')
+        output = []
+        _query = rearrange(self.query_embedding(x), 'b (t c) h w -> b t c h w', c=c)
+        _key = rearrange(self.key_embedding(x), 'b (t c) h w -> b t c h w', c=c)
+        _value = rearrange(self.value_embedding(x), 'b (t c) h w -> b t c h w', c=c)
+        # logger.info('shape of q k v_', _query.shape, _key.shape, _value.shape)
+        for (height, width), query, key, value in zip(
+                self.patchsize,
+                torch.chunk(_query, len(self.patchsize), dim=2),
+                torch.chunk(_key,   len(self.patchsize), dim=2),
+                torch.chunk(_value, len(self.patchsize), dim=2)
+                ):
+            c = query.shape[-3]
+            out_w, out_h = w // width, h // height
+
+            # query = query.view(b, t, c, out_h, height, out_w, width).permute(0, 1, 3, 5, 2, 4, 6)
+            # query = query.contiguous().view(b, t * out_h * out_w, c * height * width)
+            query = rearrange(query, 'b t c (oh h) (ow w) -> b (t oh ow) (c h w)', ow=out_w, oh=out_h)
+            key = rearrange(key, 'b t c (oh h) (ow w) -> b (t oh ow) (c h w)', ow=out_w, oh=out_h)
+            value = rearrange(value, 'b t c (oh h) (ow w) -> b (t oh ow) (c h w)', ow=out_w, oh=out_h)
+
+            scores = torch.matmul(query, key.transpose(-2, -1)) / (query.size(-1) ** -0.5)
+            p_attn = scores.softmax(dim=-1)
+            y = torch.matmul(p_attn, value)
+            # 3) "Concat" using a view and apply a final linear.
+            y = rearrange(y, 'b (t oh ow) (c h w) -> b t c (oh h) (ow w)', t=t, c=c, oh=out_h, ow=out_w, w=width, h=height)
+            # y = y.view(b, out_h, out_w, c, height, width)
+            # y = y.permute(0, 3, 1, 4, 2, 5).contiguous().view(b, c, h, w)
+            output.append(y)
+        output = torch.cat(output, 2)
+        output = rearrange(output, 'b t c h w -> b (t c) h w')
+        x = self.output_linear(output)
+        x = rearrange(x, 'b (t c) h w -> b t c h w', t=t)
+        return x
+    pass
+
+class HetConv(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1,
+                 padding=None, bias=None, p=64, g=64):
+        super(HetConv, self).__init__()
+        # Groupwise Convolution
+        # print(__class__.__name__, in_channels, out_channels, kernel_size, stride, p, g)
+        self.gwc = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size,
+                             groups=1, padding=kernel_size // 3, stride=stride)
+        # Pointwise Convolution
+        self.pwc = nn.Conv2d(in_channels, out_channels, kernel_size=1, groups=p, stride=stride)
+
+    def forward(self, x):
+        return self.gwc(x) + self.pwc(x)
 
 class ReAttention(nn.Module):
     def __init__(self, dim, heads=8, dim_head=64, dropout=0.):
@@ -273,7 +330,7 @@ class Transformer(nn.Module):
         for _ in range(depth):
             attennorm = PreNorm(dim, Attention(dim, heads=heads, dim_head=dim_head, dropout=dropout))
             if useMulA:
-                attennorm = PreNorm(dim, MultiScaleAttention(d_input=ch, d_model=ch))
+                attennorm = PreNorm(dim, MultiScaleAttention4D(d_input=ch, d_model=ch))
             self.layers.append(nn.ModuleList([
                 attennorm,
                 PreNorm(dim, FeedForward(dim, mlp_dim, dropout=dropout))
@@ -284,3 +341,26 @@ class Transformer(nn.Module):
             x = attn(x) + x
             x = ff(x) + x
         return self.norm(x)
+
+class TransformerMA(nn.Module):
+    def __init__(self, norm_shape, patchsize, d_in, d_out, d_mlp, deep=4, dropout=.2):
+        super().__init__()
+        self.layers = nn.ModuleList([])
+        # self.norm = nn.LayerNorm(d_mlp)
+        for _ in range(deep):
+            self.layers.append(
+                nn.ModuleList([
+                    PreNorm(norm_shape, MultiScaleAttention5D(patchsize=patchsize, d_input=d_in, d_model=d_out)),
+                    FeedForward(d_in, d_mlp, dropout=dropout)
+                ])
+            )
+        # self.conv = nn.Conv2d(in_channels=d_in, out_channels=d_in//2, kernel_size=1)
+
+    def forward(self, x):
+        for attn, ff in self.layers:
+            _, t, _, _, _ = x.shape
+            x = attn(x) + x
+            x_ff = ff(rearrange(x, 'b t c h w -> b h w (t c)'))
+            x_ff = rearrange(x_ff, 'b h w (t c) -> b t c h w', t=t)
+            x += x_ff
+        return x

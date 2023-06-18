@@ -1,32 +1,17 @@
+import sys
+from requests import patch
+sys.path.append('./')
 import torch
-from torch import nn
+from torch import nn, tensor
 import torch.nn.functional as F
 from einops import rearrange, repeat
 from einops.layers.torch import Rearrange
-from models.TSViT.module import Attention, PreNorm, FeedForward
+from models.TSViT.module import Attention, PreNorm, FeedForward, MultiScaleAttention4D, Transformer, HetConv, TransformerMA
 import numpy as np
 from utils.config_files_utils import get_params_values
+from loguru import logger
 
-
-class Transformer(nn.Module):
-    def __init__(self, dim, depth, heads, dim_head, mlp_dim, dropout=0.):
-        super().__init__()
-        self.layers = nn.ModuleList([])
-        self.norm = nn.LayerNorm(dim)
-        for _ in range(depth):
-            self.layers.append(nn.ModuleList([
-                PreNorm(dim, Attention(dim, heads=heads, dim_head=dim_head, dropout=dropout)),
-                PreNorm(dim, FeedForward(dim, mlp_dim, dropout=dropout))
-            ]))
-
-    def forward(self, x):
-        for attn, ff in self.layers:
-            x = attn(x) + x
-            x = ff(x) + x
-        return self.norm(x)
-
-
-class STViT(nn.Module):
+class reTSViT(nn.Module):
     """
     Spatial-Temporal ViT (used in ablation study, section 4.2)
     """
@@ -53,12 +38,12 @@ class STViT(nn.Module):
             Rearrange('b t c (h p1) (w p2) -> b t (h w) (p1 p2 c)', p1=self.patch_size, p2=self.patch_size),
             nn.Linear(patch_dim, self.dim))
         self.pos_embedding = nn.Parameter(torch.randn(1, self.num_frames, num_patches, self.dim))
-        print('pos embedding: ', self.pos_embedding.shape)
+        logger.info('pos embedding: ', self.pos_embedding.shape)
         self.space_token = nn.Parameter(torch.randn(1, 1, self.dim))
-        print('space token: ', self.space_token.shape)
+        logger.info('space token: ', self.space_token.shape)
         self.space_transformer = Transformer(self.dim, self.depth, self.heads, self.dim_head, self.dim * self.scale_dim, self.dropout)
         self.temporal_token = nn.Parameter(torch.randn(1, 1, self.dim))
-        print('temporal token: ', self.temporal_token.shape)
+        logger.info('temporal token: ', self.temporal_token.shape)
         self.temporal_transformer = Transformer(self.dim, self.depth, self.heads, self.dim_head, self.dim * self.scale_dim, self.dropout)
         self.dropout = nn.Dropout(self.emb_dropout)
         self.mlp_head = nn.Sequential(
@@ -86,7 +71,6 @@ class STViT(nn.Module):
         x = x.reshape(B, H, W, self.num_classes)
         x = x.permute(0, 3, 1, 2)
         return x
-
 
 class TSViT_single_token(nn.Module):
     """
@@ -124,11 +108,11 @@ class TSViT_single_token(nn.Module):
             nn.Linear(patch_dim, self.dim))
         self.to_temporal_embedding_input = nn.Linear(365, self.dim)
         self.temporal_token = nn.Parameter(torch.randn(1, 1, self.dim))
-        print('temporal token: ', self.temporal_token.shape)
+        logger.info('temporal token: ', self.temporal_token.shape)
         self.temporal_transformer = Transformer(self.dim, self.temporal_depth, self.heads, self.dim_head,
                                                 self.dim * self.scale_dim, self.dropout)
         self.space_pos_embedding = nn.Parameter(torch.randn(1, num_patches, self.dim))
-        print('space pos embedding: ', self.space_pos_embedding.shape)
+        logger.info('space pos embedding: ', self.space_pos_embedding.shape)
         self.space_transformer = Transformer(self.dim, self.spatial_depth, self.heads, self.dim_head, self.dim * self.scale_dim, self.dropout)
         self.dropout = nn.Dropout(self.emb_dropout)
         self.mlp_head = nn.Sequential(
@@ -161,7 +145,6 @@ class TSViT_single_token(nn.Module):
         x = x.reshape(B, H, W, self.num_classes)
         x = x.permute(0, 3, 1, 2)
         return x
-
 
 class TSViT_static_position_encodings(nn.Module):
     """
@@ -231,7 +214,6 @@ class TSViT_static_position_encodings(nn.Module):
         x = x.permute(0, 3, 1, 2)
         return x
 
-
 class TSViT_global_attention_spatial_encoder(nn.Module):
     """
     Temporal-Spatial ViT where spatial encoder attends to all cls tokens (used in ablation, section 4.2)
@@ -287,7 +269,7 @@ class TSViT_global_attention_spatial_encoder(nn.Module):
         x = torch.cat((cls_temporal_tokens, x), dim=1)
         x = self.temporal_transformer(x)
         x = x[:, :self.num_classes]
-        x = x.reshape(B, self.num_patches_1d**2, self.num_classes, self.dim).permute(0, 2, 1, 3).reshape(B * self.num_classes, self.num_patches_1d**2, self.dim)        # print(x.shape)
+        x = x.reshape(B, self.num_patches_1d**2, self.num_classes, self.dim).permute(0, 2, 1, 3).reshape(B * self.num_classes, self.num_patches_1d**2, self.dim)        # logger.info(x.shape)
         x += self.space_pos_embedding#[:, :, :(n + 1)]
         x = self.dropout(x)
         x = x.reshape(B, self.num_classes * self.num_patches_1d**2, self.dim)
@@ -297,7 +279,6 @@ class TSViT_global_attention_spatial_encoder(nn.Module):
         x = x.reshape(B, H, W, self.num_classes)
         x = x.permute(0, 3, 1, 2)
         return x
-
 
 class TViT(nn.Module):
     """
@@ -359,7 +340,6 @@ class TViT(nn.Module):
         x = x.permute(0, 3, 1, 2)
         return x
 
-
 class TSViT(nn.Module):
     """
     Temporal-Spatial ViT5 (used in main results, section 4.3)
@@ -396,10 +376,15 @@ class TSViT(nn.Module):
             nn.Linear(patch_dim, self.dim),)
         self.to_temporal_embedding_input = nn.Linear(366, self.dim)
         self.temporal_token = nn.Parameter(torch.randn(1, self.num_classes, self.dim))
+        TEMPORAL_CH = 79 # todo use config dict
         self.temporal_transformer = Transformer(self.dim, self.temporal_depth, self.heads, self.dim_head,
-                                                self.dim * self.scale_dim, self.dropout)
+                                                self.dim * self.scale_dim, TEMPORAL_CH, False, self.dropout)
+                                                # self.dim * self.scale_dim, TEMPORAL_CH, True, self.dropout) # 2023年5月15日07:43:25
         self.space_pos_embedding = nn.Parameter(torch.randn(1, num_patches, self.dim))
-        self.space_transformer = Transformer(self.dim, self.spatial_depth, self.heads, self.dim_head, self.dim * self.scale_dim, self.dropout)
+        SPACE_CH = 144
+        self.space_transformer = Transformer(self.dim, self.spatial_depth, self.heads, self.dim_head, self.dim *
+                                            #  self.scale_dim, SPACE_CH, True, self.dropout)
+                                             self.scale_dim, SPACE_CH, False, self.dropout) #2023年5月15日07:43:51
         self.dropout = nn.Dropout(self.emb_dropout)
         self.mlp_head = nn.Sequential(
             nn.LayerNorm(self.dim),
@@ -423,18 +408,17 @@ class TSViT(nn.Module):
         x = x.reshape(-1, T, self.dim)
         cls_temporal_tokens = repeat(self.temporal_token, '() N d -> b N d', b=B * self.num_patches_1d ** 2)
         x = torch.cat((cls_temporal_tokens, x), dim=1)
-        x = self.temporal_transformer(x)
+        x = self.temporal_transformer(x) # x in torch.Size([2304, 79, 128]), out same as in
         x = x[:, :self.num_classes]
         x = x.reshape(B, self.num_patches_1d**2, self.num_classes, self.dim).permute(0, 2, 1, 3).reshape(B*self.num_classes, self.num_patches_1d**2, self.dim)
         x += self.space_pos_embedding#[:, :, :(n + 1)]
         x = self.dropout(x)
-        x = self.space_transformer(x)
+        x = self.space_transformer(x) # shape of x_in is torch.Size([340, 144, 128]), out is torch.Size([304, 144, 128])
         x = self.mlp_head(x.reshape(-1, self.dim))
         x = x.reshape(B, self.num_classes, self.num_patches_1d**2, self.patch_size**2).permute(0, 2, 3, 1)
         x = x.reshape(B, H, W, self.num_classes)
         x = x.permute(0, 3, 1, 2)
         return x
-
 
 class TSViT_lookup(nn.Module):
     """
@@ -556,28 +540,146 @@ class TSViT_lookup(nn.Module):
         index = torch.bucketize(x.ravel(), self.eval_dates)
         return self.inference_temporal_pos_embedding[index].reshape((B, T, self.dim))
 
+class STViT(nn.Module):
+    """
+    Spatial-Temporal ViT (used in ablation study, section 4.2)
+    """
+    def __init__(self, model_config):
+        super().__init__()
+        self.image_size = model_config['img_res']
+        self.patch_size = model_config['patch_size']
+        self.num_patches_1d = self.image_size//self.patch_size
+        self.num_classes = model_config['num_classes']
+        self.num_frames = model_config['max_seq_len']
+        self.dim = model_config['dim']
+        self.depth = model_config['depth']
+        self.heads = model_config['heads']
+        self.dim_head = model_config['dim_head']
+        self.dropout = model_config['dropout']
+        self.emb_dropout = model_config['emb_dropout']
+        self.pool = model_config['pool']
+        self.scale_dim = model_config['scale_dim']
+        num_patches = self.num_patches_1d ** 2
+        patch_dim = model_config['num_channels'] * self.patch_size ** 2
+        self.to_patch_embedding = nn.Sequential(
+            Rearrange('b t c (h p1) (w p2) -> b t (h w) (p1 p2 c)', p1=self.patch_size, p2=self.patch_size),
+            nn.Linear(patch_dim, self.dim))
+        self.pos_embedding = nn.Parameter(torch.randn(1, self.num_frames, num_patches, self.dim))
+        logger.info('pos embedding: ', self.pos_embedding.shape)
+        self.space_token = nn.Parameter(torch.randn(1, 1, self.dim))
+        logger.info('space token: ', self.space_token.shape)
+        self.space_transformer = Transformer(self.dim, self.depth, self.heads, self.dim_head, self.dim * self.scale_dim, self.dropout)
+        self.temporal_token = nn.Parameter(torch.randn(1, 1, self.dim))
+        logger.info('temporal token: ', self.temporal_token.shape)
+        self.temporal_transformer = Transformer(self.dim, self.depth, self.heads, self.dim_head, self.dim * self.scale_dim, self.dropout)
+        self.dropout = nn.Dropout(self.emb_dropout)
+        self.mlp_head = nn.Sequential(
+            nn.LayerNorm(self.dim),
+            nn.Linear(self.dim, self.num_classes * self.patch_size**2))
 
+    def forward(self, x):
+        x = x.permute(0, 1, 4, 2, 3)
+        B, T, C, H, W = x.shape
+        x = self.to_patch_embedding(x)
+        b, t, n, _ = x.shape
+        x += self.pos_embedding#[:, :, :(n + 1)]
+        x = rearrange(x, 'b t n d -> (b t) n d')
+        x = self.space_transformer(x)
+        x = rearrange(x, '(b t) ... -> b t ...', b=b)  # use only space token, location 0
+        cls_temporal_tokens = repeat(self.temporal_token, '() () d -> b t k d', b=b, t=1, k=self.num_patches_1d**2)
+        x = torch.cat((cls_temporal_tokens, x), dim=1)
+        x = x.permute(0, 2, 1, 3)
+        x = x.reshape(b * self.num_patches_1d**2, self.num_frames+1, self.dim)
+        x = self.temporal_transformer(x)
+        x = x.mean(dim=1) if self.pool == 'mean' else x[:, 0]
+        x = self.mlp_head(x)
+        x = x.reshape(B, self.num_patches_1d**2, self.patch_size**2, self.num_classes)
+        x = x.reshape(B, H*W, self.num_classes)
+        x = x.reshape(B, H, W, self.num_classes)
+        x = x.permute(0, 3, 1, 2)
+        return x
+
+class SITS_MViT(nn.Module):
+    def __init__(self, model_config) -> None:
+        super().__init__()
+        self.n_class = model_config['num_classes']
+        self.time = 60
+        # width, hight = 24, 24
+
+        # toshapeWH = 16
+        to_channel = 6
+        mid_channel = to_channel//2
+        self.conv1 = nn.Sequential(
+            nn.Conv3d(self.time, self.time, kernel_size=(9,3,3), stride=1, padding=(0,1,1)),
+            nn.BatchNorm3d(self.time), nn.ReLU()
+        )
+        self.conv2 = nn.Sequential(
+            HetConv(mid_channel, mid_channel, p=1, g=8),
+            nn.BatchNorm2d(mid_channel), nn.ReLU()
+        )
+        self.linear = nn.Linear(mid_channel, 11)
+        self.conv_drop = nn.Dropout(0.2)
+        self.conv3 = nn.Sequential(
+            nn.Conv3d(self.time, self.time, kernel_size=3),
+            nn.Conv3d(self.time, self.time, kernel_size=3),
+            nn.Conv3d(self.time, self.time, kernel_size=3),
+            nn.Conv3d(self.time, self.time, kernel_size=3),
+        )
+        patch_size = [(8, 8), (4, 4), (2, 2)]
+        d = self.time * to_channel
+        self.transformer = TransformerMA(norm_shape=[16, 16] , patchsize=patch_size, d_in=d, d_out=d, d_mlp=d, deep=4)
+        self.seq_mlp = nn.Sequential(
+            nn.LayerNorm(self.time*to_channel), # t* x_transformer_out.shape[-3]
+            nn.Linear(self.time*to_channel, self.n_class)
+        )
+        self.conv_transpose = nn.Sequential(
+            nn.ConvTranspose2d(self.n_class, self.n_class, kernel_size=3),
+            nn.ConvTranspose2d(self.n_class, self.n_class, kernel_size=3),
+            nn.ConvTranspose2d(self.n_class, self.n_class, kernel_size=3),
+            nn.ConvTranspose2d(self.n_class, self.n_class, kernel_size=3),
+        )
+    def forward(self, x : torch.Tensor):
+        b, t, h, w, c = x.shape
+        x = x.permute(0, 1, 4, 2, 3)
+        x_c = self.conv1(x)
+        x_c = rearrange(x_c, 'b t c h w -> (b t) c h w')
+        x_c = self.conv2(x_c)
+        x_c = rearrange(x_c, '(b t) c h w -> b t h w c', b=b)
+        x_c = rearrange(self.linear(x_c), 'b t h w c-> b t c h w')
+        x = x + self.conv_drop(x_c)
+
+        x = self.conv3(x)
+        x = repeat(x, 'b t c h w -> b t (r c) h w', r=2)
+        x = self.transformer(x)
+
+        x = rearrange(x, 'b t c h w -> b h w (t c)')
+        x = self.seq_mlp(x)
+        x = rearrange(x, 'b h w class -> b class h w')
+        x = self.conv_transpose(x)
+        return x
 
 if __name__ == "__main__":
     res = 24
-    model_config = {'img_res': res, 'patch_size': 3, 'patch_size_time': 1, 'patch_time': 4, 'num_classes': 20,
+    model_config = {'img_res': res, 'patch_size': 3, 'patch_size_time': 1, 'patch_time': 4, 'num_classes': 19,
                     'max_seq_len': 16, 'dim': 128, 'temporal_depth': 6, 'spatial_depth': 2,
                     'heads': 4, 'pool': 'cls', 'num_channels': 14, 'dim_head': 64, 'dropout': 0., 'emb_dropout': 0.,
                     'scale_dim': 4, 'depth': 4}
     train_config = {'dataset': "psetae_repl_2018_100_3", 'label_map': "labels_20k2k", 'max_seq_len': 16, 'batch_size': 5,
                     'extra_data': [], 'num_workers': 4}
 
-    x = torch.rand((3, 16, res, res, 14))
+    x = torch.rand((16, 60, res, res, 11))
 
     # model = TViT(model_config).cuda()
     # model = STViT(model_config)#.cuda()
-    model = TSViT_global_attention_spatial_encoder(model_config)#.cuda()
+    # model = TSViT_global_attention_spatial_encoder(model_config)#.cuda()
+    model = SITS_MViT(model_config)
+    logger.info(f'{TSViT_global_attention_spatial_encoder.__mro__}')
 
     parameters = filter(lambda p: p.requires_grad, model.parameters())
     parameters = sum([np.prod(p.size()) for p in parameters]) / 1_000_000
-    print('Trainable Parameters: %.3fM' % parameters)
+    logger.info('Trainable Parameters: %.3fM' % parameters)
 
     out = model(x)
 
     # torch.norm(cls, dim=2).shape
-    print("Shape of out :", out.shape)  # [B, num_classes]
+    logger.info("Shape of out :", out.shape)  # [B, num_classes]

@@ -13,10 +13,11 @@ from metrics.loss_functions import get_loss
 from utils.summaries import write_mean_summaries, write_histogram_summaries
 from data import get_model_data_input, get_loss_data_input
 import argparse
+from loguru import logger
 
 
 def train_and_evaluate(net, dataloaders, config, device):
-    
+
     def train_step(net, sample, loss_fn, optimizer, device, model_input_fn, loss_input_fn):
         # zero the parameter gradients
         optimizer.zero_grad()
@@ -32,7 +33,7 @@ def train_and_evaluate(net, dataloaders, config, device):
 
     def evaluate(net, evalloader, loss_fn):  # , config):
         Neval = len(evalloader)
-        
+
         logits_bin_all = []
         samelabels_bin_all = []
         losses_all = []
@@ -42,7 +43,7 @@ def train_and_evaluate(net, dataloaders, config, device):
             for step, sample in enumerate(evalloader):
                 if step % 100 == 0:
                     print("Eval step %d of %d" % (step, Neval))
-        
+
                 logits = net(model_input_fn(sample, device))
 
                 ground_truth = loss_input_fn(sample, device)
@@ -54,7 +55,7 @@ def train_and_evaluate(net, dataloaders, config, device):
                     sameclass_labels = ground_truth
 
                 loss = loss_fn['all'](logits, sameclass_labels)
-                
+
                 logits_bin_all.append(logits.reshape(-1).cpu())
                 samelabels_bin_all.append(sameclass_labels.reshape(-1).cpu())
                 losses_all.append(loss.reshape(-1).cpu())
@@ -93,30 +94,30 @@ def train_and_evaluate(net, dataloaders, config, device):
         start_global = int(checkpoint_path.split("_")[-1].split(".")[0])
         start_epoch = int(checkpoint_path.split("_")[-2].split(".")[0])
         lr *= dr ** start_epoch
-        print("current learn rate: ", lr)
+        logger.info(f'current learn rate: {lr}')
     else:
         start_global = 1
         start_epoch = 1
-    
+
     if len(local_device_ids) > 1:
         net = nn.DataParallel(net, device_ids=local_device_ids)
     net.to(device)
-    
+
     if save_path and (not os.path.exists(save_path)):
         os.makedirs(save_path)
 
     copy_yaml(config)
 
     model_input_fn = get_model_data_input(config)
-    
+
     loss_input_fn = get_loss_data_input(config)
-    
+
     loss_fn = {'all': get_loss(config, device, reduction='none'),
                'mean': get_loss(config, device, reduction="mean")}
-    
+
     optimizer = optim.Adam(net.parameters(), lr=lr)
     optimizer.zero_grad()
-    
+
     decay_fn = lambda epoch: dr ** epoch
     scheduler = LambdaLR(optimizer, lr_lambda=decay_fn)
 
@@ -130,7 +131,7 @@ def train_and_evaluate(net, dataloaders, config, device):
 
             logits, ground_truth, loss = train_step(net, sample, loss_fn, optimizer, device,
                                                     model_input_fn=model_input_fn, loss_input_fn=loss_input_fn)
-            
+
             # save model ----------------------------------------------------------------------------------------------#
             if abs_step % save_steps == 0:  # evaluate model every eval_steps batches
                 if len(local_device_ids) > 1:
@@ -166,12 +167,12 @@ def train_and_evaluate(net, dataloaders, config, device):
         if epoch % dr_epochs == 0:
             scheduler.step()
             print("decaying lr, new lr: %.10f" % optimizer.param_groups[0]["lr"])
-        
+
     print('Finished Training')
-    
-    
+
+
 if __name__ == "__main__":
-    
+
     #------------------------------------------------------------------------------------------------------------------#
     # USER INPUT
     parser = argparse.ArgumentParser(description='PyTorch CSCL pre-training')
@@ -188,7 +189,7 @@ if __name__ == "__main__":
 
     config = read_yaml(config_file)
     config['local_device_ids'] = device_ids
-    
+
     dataloaders = get_dataloaders(config)
 
     net = get_model(config, device)

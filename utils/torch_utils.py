@@ -43,7 +43,7 @@ def get_net_trainable_params(net):
     except AttributeError:
         trainable_params = list(net.parameters())
     logger.debug('Trainable params shapes are:')
-    logger.debug([trp.shape for trp in trainable_params])
+    # logger.debug([trp.shape for trp in trainable_params])
     return trainable_params
 
 

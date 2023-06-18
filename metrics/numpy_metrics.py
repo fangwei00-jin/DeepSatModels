@@ -1,5 +1,6 @@
 import numpy as np
 from sklearn.metrics import confusion_matrix
+from loguru import logger
 
 
 def confusion_mat(predicted, labels, n_classes):  # , unk_masks=None):
@@ -29,11 +30,14 @@ def confusion_mat(predicted, labels, n_classes):  # , unk_masks=None):
                 cm = np.concatenate((cm, np.zeros((diff, cm_side))), axis=0)
                 cm = np.concatenate((cm, np.zeros((cm_side + diff, diff))), axis=1)
                 break
+    np.set_printoptions(linewidth=200)
+    logger.info(f'confusion matrix: shape:{cm.shape}\n{cm.astype(int)}')
     return cm
 
 
 def get_prediction_splits(predicted, labels, n_classes):
     cm = confusion_mat(predicted, labels, n_classes).astype(np.float32)
+
     diag = np.diagonal(cm)
     rowsum = cm.sum(axis=1)
     colsum = cm.sum(axis=0)
@@ -108,7 +112,7 @@ def get_classification_metrics(predicted, labels, n_classes, unk_masks=None):
             'micro': [micro_acc, micro_precision, micro_recall, micro_F1, micro_IOU],
             'macro': [macro_acc, macro_precision, macro_recall, macro_F1, macro_IOU]}
 
-    
+
 def get_accuracy(predicted, labels, unk_mask=None, return_splits=False):
     if unk_mask is not None:
         predicted = predicted[unk_mask]
@@ -131,4 +135,3 @@ def get_per_class_loss(losses, labels, unk_masks=None):
         idx = labels == label
         class_loss.append(losses[idx].mean())
     return unique_labels, np.asarray(class_loss)
-
