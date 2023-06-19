@@ -14,6 +14,7 @@ from models import get_model
 from utils.config_files_utils import read_yaml, copy_yaml, get_params_values
 from utils.torch_utils import get_device, get_net_trainable_params, load_from_checkpoint
 from data import get_dataloaders
+from sklearn.metrics import confusion_matrix
 from metrics.torch_metrics import get_mean_metrics
 from metrics.numpy_metrics import get_classification_metrics, get_per_class_loss
 from metrics.loss_functions import get_loss
@@ -75,6 +76,8 @@ def train_and_evaluate(net, dataloaders, config, device, lin_cls=False):
 
         eval_metrics = get_classification_metrics(predicted=predicted_classes, labels=target_classes,
                                                   n_classes=num_classes, unk_masks=None)
+        cm = confusion_matrix(target_classes, predicted_classes)
+        logger.info(f'confusion matrix: shape:{cm.shape}\n{cm.astype(int)}')
 
         micro_acc, micro_precision, micro_recall, micro_F1, micro_IOU = eval_metrics['micro']
         macro_acc, macro_precision, macro_recall, macro_F1, macro_IOU = eval_metrics['macro']
@@ -121,6 +124,13 @@ def train_and_evaluate(net, dataloaders, config, device, lin_cls=False):
 
     if save_path and (not os.path.exists(save_path)):
         os.makedirs(save_path)
+    dt_info = time.strftime('%y%m%d_%H%M', time.localtime())
+    save_path += f'/{dt_info}'
+    config['CHECKPOINT']["save_path"] = save_path
+    logger.info(f'savepath: {save_path}')
+    if not config['debug']:
+        writer = SummaryWriter(f'{save_path}/avg')
+        writer_cls = SummaryWriter(f'{save_path}/cls')
 
     if not config['debug']:
         copy_yaml(config)
@@ -136,11 +146,6 @@ def train_and_evaluate(net, dataloaders, config, device, lin_cls=False):
     optimizer.zero_grad()
 
     scheduler = build_scheduler(config, optimizer, num_steps_train)
-    dt_info = time.strftime('%y%m%d_%H%M', time.localtime())
-    save_path += f'/{dt_info}'
-    logger.info(f'savepath: {save_path}')
-    if not config['debug']:
-        writer = SummaryWriter(f'{save_path}')
 
     BEST_IOU = 0
     net.train()
@@ -181,7 +186,7 @@ def train_and_evaluate(net, dataloaders, config, device, lin_cls=False):
                 if not config['debug']:
                     write_mean_summaries(writer, eval_metrics[1]['micro'], abs_step, mode="eval_micro", optimizer=None)
                     write_mean_summaries(writer, eval_metrics[1]['macro'], abs_step, mode="eval_macro", optimizer=None)
-                    write_class_summaries(writer, [eval_metrics[0], eval_metrics[1]['class']], abs_step, mode="eval",
+                    write_class_summaries(writer_cls, [eval_metrics[0], eval_metrics[1]['class']], abs_step, mode="eval",
                                         optimizer=None)
                 net.train()
 

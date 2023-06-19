@@ -31,7 +31,6 @@ def confusion_mat(predicted, labels, n_classes):  # , unk_masks=None):
                 cm = np.concatenate((cm, np.zeros((cm_side + diff, diff))), axis=1)
                 break
     np.set_printoptions(linewidth=200)
-    logger.info(f'confusion matrix: shape:{cm.shape}\n{cm.astype(int)}')
     return cm
 
 

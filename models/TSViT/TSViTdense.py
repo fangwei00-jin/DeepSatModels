@@ -658,6 +658,65 @@ class SITS_MViT(nn.Module):
         x = self.conv_transpose(x)
         return x
 
+class SITS_MViT_v1(nn.Module):
+    def __init__(self, model_config) -> None:
+        super().__init__()
+        self.n_class = model_config['num_classes']
+        self.time = 60
+        # width, hight = 24, 24
+
+        # toshapeWH = 16
+        to_channel = 6
+        mid_channel = to_channel//2
+        self.conv1 = nn.Sequential(
+            nn.Conv3d(self.time, self.time, kernel_size=(9,3,3), stride=1, padding=(0,1,1)),
+            nn.BatchNorm3d(self.time), nn.ReLU()
+        )
+        self.conv2 = nn.Sequential(
+            HetConv(mid_channel, mid_channel, p=1, g=8),
+            nn.BatchNorm2d(mid_channel), nn.ReLU()
+        )
+        self.linear = nn.Linear(mid_channel, 11)
+        self.conv_drop = nn.Dropout(0.2)
+        self.conv3 = nn.Sequential(
+            nn.Conv3d(self.time, self.time, kernel_size=3),
+            nn.Conv3d(self.time, self.time, kernel_size=3),
+            nn.Conv3d(self.time, self.time, kernel_size=3),
+            nn.Conv3d(self.time, self.time, kernel_size=3),
+        )
+        patch_size = [(8, 8), (4, 4), (2, 2)]
+        d = self.time * to_channel
+        self.transformer = TransformerMA(norm_shape=[16, 16] , patchsize=patch_size, d_in=d, d_out=d, d_mlp=d, deep=4)
+        self.seq_mlp = nn.Sequential(
+            nn.LayerNorm(self.time*to_channel), # t* x_transformer_out.shape[-3]
+            nn.Linear(self.time*to_channel, self.n_class)
+        )
+        self.conv_transpose = nn.Sequential(
+            nn.ConvTranspose2d(self.n_class, self.n_class, kernel_size=3),
+            nn.ConvTranspose2d(self.n_class, self.n_class, kernel_size=3),
+            nn.ConvTranspose2d(self.n_class, self.n_class, kernel_size=3),
+            nn.ConvTranspose2d(self.n_class, self.n_class, kernel_size=3),
+        )
+    def forward(self, x : torch.Tensor):
+        b, t, h, w, c = x.shape
+        x = x.permute(0, 1, 4, 2, 3)
+        x_c = self.conv1(x)
+        x_c = rearrange(x_c, 'b t c h w -> (b t) c h w')
+        x_c = self.conv2(x_c)
+        x_c = rearrange(x_c, '(b t) c h w -> b t h w c', b=b)
+        x_c = rearrange(self.linear(x_c), 'b t h w c-> b t c h w')
+        x = x + self.conv_drop(x_c)
+
+        x = self.conv3(x)
+        x = repeat(x, 'b t c h w -> b t (r c) h w', r=2)
+        x = self.transformer(x)
+
+        x = rearrange(x, 'b t c h w -> b h w (t c)')
+        x = self.seq_mlp(x)
+        x = rearrange(x, 'b h w class -> b class h w')
+        x = self.conv_transpose(x)
+        return x
+
 if __name__ == "__main__":
     res = 24
     model_config = {'img_res': res, 'patch_size': 3, 'patch_size_time': 1, 'patch_time': 4, 'num_classes': 19,

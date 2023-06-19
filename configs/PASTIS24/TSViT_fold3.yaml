@@ -48,7 +48,8 @@ SOLVER:
   num_epochs: 100
   num_warmup_epochs: 10
   steps: (0, 80000)
-  loss_function:  masked_cross_entropy
+  # loss_function:  masked_cross_entropy
+  loss_function:  focal_loss
   class_weights:
   lr_scheduler: 'cosine'
   lr_base: 1.0e-3
